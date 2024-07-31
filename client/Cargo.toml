@@ -6,4 +6,8 @@ edition = "2021"
 [dependencies]
 protocol = { path = "../protocol" }
 tokio = { version = "1", features = ["full"] }
-quinn = "0.6"
+quinn = "0.11.2"
+quinn-proto = "0.11"
+bincode = "1.3"
+rustls = "0.23"
+anyhow = "1.0"

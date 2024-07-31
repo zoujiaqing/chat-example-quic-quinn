@@ -30,6 +30,7 @@ Cargo.lock
 *.so
 *.dylib
 *.dll
+*.exe
 
 # Ignore test result files
 *.out
@@ -37,4 +38,3 @@ Cargo.lock
 
 # Ignore cargo binaries
 **/target/
-
