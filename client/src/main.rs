@@ -1,51 +1,58 @@
-use std::{
-    net::SocketAddr,
-    sync::Arc,
-};
+use anyhow::*;
+use quinn::{Endpoint, Connection};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::result::Result::Ok;
 
-use quinn::{ClientConfig, Endpoint};
-use quinn_proto::crypto::rustls::QuicClientConfig;
-use protocol::Message;
-use anyhow::Result;
+extern crate protocol;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    // 设置目标地址
-    let server_addr: SocketAddr = "[::1]:5000".parse()?;
+async fn main() -> Result<()>
+{
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // 配置客户端
-    let client_config = configure_client_without_tls();
+    let (cert_der, _) = protocol::common::load_cert_and_key()?;
+    let client_config = protocol::common::configure_client(cert_der)?;
 
-    let mut endpoint = Endpoint::client("[::]:0".parse()?)?;
+    let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
     endpoint.set_default_client_config(client_config);
 
-    // 连接到服务器
+    let server_addr = protocol::common::get_server_addr();
     let connection = endpoint.connect(server_addr, "localhost")?.await?;
+    println!("Connected to {}", connection.remote_address());
 
-    // 打开一个双向流
-    let (mut send, mut recv) = connection.open_bi().await?;
+    run_client(connection).await?;
 
-    // 发送消息
-    let message = Message::new("Hello, server!");
-    let message_bytes = bincode::serialize(&message)?;
-    send.write_all(&message_bytes).await?;
-    send.finish();
-
-    // 接收服务器的回显
-    let mut buffer = vec![0; 1024];
-    let n = recv.read(&mut buffer).await?.expect("Failed to read from stream");
-    buffer.truncate(n);
-    let received_message: Message = bincode::deserialize(&buffer)?;
-
-    println!("Received: {}", received_message.content);
-
+    endpoint.wait_idle().await;
     Ok(())
 }
 
-fn configure_client_without_tls() -> ClientConfig {
-    let mut root_store = rustls::RootCertStore::empty();
-    let client_crypto = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-    ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto).unwrap()))
+async fn run_client(connection: Connection) -> Result<()> {
+    loop {
+        println!("Enter a message (or 'quit' to exit):");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        
+        let message = input.trim();
+        if message == "quit" {
+            break;
+        }
+
+        let response = send_message(&connection, message).await?;
+        println!("Server response: {}", response);
+    }
+
+    connection.close(0u32.into(), b"Done");
+    Ok(())
+}
+
+async fn send_message(connection: &Connection, message: &str) -> Result<String> {
+    let (mut send, mut recv) = connection.open_bi().await?;
+    
+    send.write_all(message.as_bytes()).await?;
+    send.finish();
+
+    let mut response = String::new();
+    recv.read_to_string(&mut response).await?;
+
+    Ok(response)
 }
